@@ -1,0 +1,36 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: flowable-demo
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/flowable_demo?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+flowable:
+  # 开发环境：允许引擎检查并创建/升级 ACT_* 表（生产应改为 false，走受控升级脚本）
+  database-schema-update: true
+  # audit 级别保存流程实例、活动、任务与变量历史
+  history-level: audit
+  # 示例流程无定时器/异步节点，先关闭异步执行器
+  async-executor-activate: false
+  # 自动部署 resources/processes 下的 BPMN 文件
+  process-definition-location-prefix: classpath*:/processes/
+  process-definition-location-suffixes: '**.bpmn20.xml,**.bpmn'
+
+logging:
+  level:
+    org.flowable: info
+  charset:
+    console: UTF-8
