@@ -28,6 +28,7 @@ Spring Boot 3 整合 Flowable 7 的可运行示例：以「员工请假 → 部�
 | Maven | 3.9.3 | 构建 |
 | 内嵌 Tomcat | 10.1.43 | Spring Boot 3.5.4 自带 |
 | 应用端口 | 8080 | 可在 `application.yml` 修改 |
+| 可视化页面 | 原生 HTML / CSS / JS | `src/main/resources/static/`，零框架、零构建、同源 fetch |
 
 > 版本依据：Flowable 7.2.0 官方 Release Notes 明确「Upgrade to Spring Boot 3.5.4」；Flowable 8.0.0 明确「Flowable 8 is now based on Spring Framework 7 and Spring Boot 4. There is no support for Spring Boot 3 anymore」。因此 Spring Boot 3 项目应固定 7.2.0，不要引入 8.x。
 
@@ -129,6 +130,19 @@ curl http://localhost:8080/api/process/instances/{processInstanceId}/history/var
 {"code":409,"message":"该业务单号已存在，请勿重复提交","data":null,"timestamp":...}
 ```
 
+### 3.6 打开请求流程可视化页面
+
+应用启动后，浏览器直接访问：
+
+```text
+http://localhost:8080/
+```
+
+页面会用一列「请求流水」把「查流程定义 → 发起申请 → 查待办 → 办理审批 → 查状态 → 查轨迹 → 查历史变量」逐条画出来，每张卡片固定展示触发操作、请求地址与方法、请求参数、加载状态、响应结果、错误信息六个环节；支持单步执行、一键串联和 5 个异常场景。
+
+- 逐步操作与截图说明：`docs/请求流程可视化页面操作指南.md`
+- 慢速演示（便于观察加载态）：`http://localhost:8080/?slow=1`
+
 ## 4、工程结构
 
 ```text
@@ -136,6 +150,12 @@ flowable-demo/
 ├── pom.xml                                   # Boot 3.5.4 + Flowable 7.2.0
 ├── README.md
 ├── db/init.sql                               # 建库 + 最小权限账号（首次手工执行）
+├── docs/                                     # 教程、页面操作指南与截图
+│   ├── SpringBoot3整合Flowable实战教程.md
+│   ├── 请求流程可视化页面操作指南.md
+│   └── images/                               # 逐步操作截图（14 张）
+├── tools/
+│   └── capture_flow.py                       # Playwright 逐步截图脚本（可复现）
 └── src/main/
     ├── java/com/example/flowabledemo/
     │   ├── FlowableDemoApplication.java      # 启动类
@@ -155,6 +175,10 @@ flowable-demo/
     └── resources/
         ├── application.yml
         ├── schema.sql                        # 业务表 DDL（自动执行）
+        ├── static/                           # 请求流程可视化页面（零依赖静态资源）
+        │   ├── index.html                    # 控制台 + 步骤总览 + 请求流水
+        │   ├── app.css
+        │   └── app.js                        # fetch 调用 /api，渲染六个环节
         └── processes/
             └── leave-approval.bpmn20.xml     # BPMN 2.0 流程定义（自动部署）
 ```
@@ -214,6 +238,7 @@ flowable-demo/
 | 重复提交生成多个流程实例 | 只做「先查再启动」的预检查 | 业务表唯一键 + 事务兜底 |
 | `ACT_*` 表结构版本异常 | 引擎版本与库表版本不一致 | 核对 Flowable 版本、Schema 升级脚本，生产用受控升级 |
 | Windows 控制台中文乱码 | Logback 跟随系统 GBK 代码页 | `logging.charset.console: UTF-8`，CMD 下 `chcp 65001` |
+| 浏览器访问页面后日志刷 `NoResourceFoundException` ERROR 堆栈 | 兜底的 `@ExceptionHandler(Exception.class)` 把静态资源 404 当成服务端故障 | 显式处理 `NoResourceFoundException` 返回 404，并在页面声明内联 favicon |
 
 ## 9、生产化建议
 
@@ -225,7 +250,39 @@ flowable-demo/
 6. **多实例部署**：所有实例共享同一数据库，合理配置异步作业锁与时钟同步；监控 `ACT_RU_*`、`ACT_HI_*`、作业积压与连接池。
 7. **不要手改引擎表**：业务扩展信息放自己的业务表，通过 `businessKey` / `processInstanceId` / `taskId` 关联。
 
-## 10、参考资料
+## 10、请求流程可视化页面
+
+页面是 `src/main/resources/static/` 下的三份静态资源，由 Spring Boot 直接托管，**零前端框架、零构建、零 CDN**，`java -jar` 启动后访问 <http://localhost:8080/> 即可。
+
+它把请假审批的 7 次请求按真实顺序渲染成一列「请求流水」，每张卡片固定展示六个环节：
+
+| 环节 | 展示内容 |
+| --- | --- |
+| 1 触发操作 | 该步由哪个按钮触发、依赖哪一步的数据 |
+| 2 请求地址与方法 | GET / POST 徽标 + 完整 URL（含 Query、路径变量） |
+| 3 请求参数 | 实际发送的 JSON 或查询参数 |
+| 4 加载状态 | 请求中的进度条，完成后显示耗时 |
+| 5 响应结果 | HTTP 状态码 + 格式化 JSON |
+| 6 错误信息 | 失败时的红色错误框与 `ApiResult.message` |
+
+交互能力：
+
+- **单步执行**：点任一节点只发该步请求，便于对照接口文档；
+- **一键运行**：按 1→7 串行执行，自动传递 `processInstanceId` / `taskId`，并自动更换业务单号避免幂等冲突；
+- **异常场景**：内置 5 个按钮，演示参数校验 400、重复单号 409、空 `userId` 400、越权办理 400、实例不存在 400；
+- **慢速演示**：`?slow=1` 把每次请求人为延后 1.2 秒，便于观察「加载状态」；
+- **网络错误**：把接口基址改成不可达地址，可看到 `Failed to fetch` 与服务端 4xx 的区别。
+
+实现要点（`static/app.js`）：
+
+- `STEPS` 数组声明 7 个步骤的 `path / params / body / after`，`after` 负责把上一步返回值写入上下文；
+- 统一的 `execute()` 负责 `fetch` → 计时 → 渲染成功/失败卡片 → 更新步骤状态与汇总；
+- JSON 语法高亮用正则分词后逐段上色，不引入任何高亮库；
+- 请求全部同源，不需要 CORS 配置，也没有跨域预检。
+
+逐步操作说明与 14 张实测截图见 `docs/请求流程可视化页面操作指南.md`。
+
+## 11、参考资料
 
 - Flowable Open Source 文档：https://www.flowable.com/open-source/docs/
 - Flowable Spring Boot 文档：https://www.flowable.com/open-source/docs/bpmn/ch05a-Spring-Boot/

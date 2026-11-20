@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flowable 请假审批 · 请求流程可视化实验室</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-size='36' font-family='Arial,sans-serif' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+
+<!-- ============ 页头 ============ -->
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">F</span>
+      <div>
+        <h1>请求流程可视化实验室</h1>
+        <p class="brand-sub">Flowable 请假审批 · 每一次点击背后的 HTTP 请求，全部摊开给你看</p>
+      </div>
+    </div>
+    <div class="env-tags">
+      <span class="tag">Spring Boot 3.5.4</span>
+      <span class="tag">Flowable 7.2.0</span>
+      <span class="tag tag-ok" id="connTag">同源 REST</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ 说明条 ============ -->
+  <section class="intro">
+    <strong>这个页面做什么：</strong>按
+    <em>触发操作 → 请求地址与方法 → 请求参数 → 加载状态 → 响应结果 / 错误信息</em>
+    六个环节，把请假审批从「查流程定义」到「查历史变量」的 7 次请求逐条画出来。
+    既能单步执行，也能一键串联跑完整流程；还提供 5 个异常场景，专门演示错误分支。
+  </section>
+
+  <!-- ============ 控制台 ============ -->
+  <section class="panel console">
+    <div class="panel-head">
+      <h2>控制台</h2>
+      <span class="panel-hint">参数会原样写进请求体，改完立即生效</span>
+    </div>
+
+    <div class="console-grid">
+      <label class="field field-wide">
+        <span>接口基址 Base URL</span>
+        <input id="baseUrl" type="text" spellcheck="false">
+      </label>
+
+      <label class="field">
+        <span>业务单号 businessKey</span>
+        <input id="businessKey" type="text">
+      </label>
+      <label class="field">
+        <span>申请人 applicantId</span>
+        <input id="applicantId" type="text">
+      </label>
+      <label class="field">
+        <span>审批人 approverId</span>
+        <input id="approverId" type="text">
+      </label>
+      <label class="field field-sm">
+        <span>天数 days</span>
+        <input id="days" type="number" min="1" max="365">
+      </label>
+      <label class="field">
+        <span>请假事由 reason</span>
+        <input id="reason" type="text">
+      </label>
+      <label class="field">
+        <span>审批结论 approved</span>
+        <select id="approved">
+          <option value="true">true · 通过</option>
+          <option value="false">false · 驳回</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>审批意见 comment</span>
+        <input id="comment" type="text">
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btnRunAll">▶ 一键运行完整流程（7 步）</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+      <span class="divider"></span>
+      <span class="actions-label">异常场景：</span>
+      <button class="btn btn-danger-ghost" data-scenario="badDays">参数校验 400</button>
+      <button class="btn btn-danger-ghost" data-scenario="duplicate">重复单号 409</button>
+      <button class="btn btn-danger-ghost" data-scenario="emptyUser">空 userId 400</button>
+      <button class="btn btn-danger-ghost" data-scenario="unauthorized">越权办理 400</button>
+      <button class="btn btn-danger-ghost" data-scenario="notFound">实例不存在 400</button>
+    </div>
+  </section>
+
+  <!-- ============ 步骤总览（各步骤顺序） ============ -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>流程步骤总览</h2>
+      <span class="panel-hint">点击任一步骤可单独执行；编号即请求顺序</span>
+    </div>
+    <div class="stepper" id="stepper"><!-- JS 渲染 --></div>
+  </section>
+
+  <!-- ============ 汇总条 ============ -->
+  <section class="summary" id="summary">
+    <div class="summary-item"><span class="sum-num" id="sumTotal">0</span><span class="sum-label">已发起请求</span></div>
+    <div class="summary-item"><span class="sum-num sum-ok" id="sumOk">0</span><span class="sum-label">成功</span></div>
+    <div class="summary-item"><span class="sum-num sum-err" id="sumErr">0</span><span class="sum-label">失败</span></div>
+    <div class="summary-item"><span class="sum-num" id="sumCost">0 ms</span><span class="sum-label">累计耗时</span></div>
+    <div class="summary-tip" id="sumTip">尚未发起请求，先点「一键运行完整流程」试试</div>
+  </section>
+
+  <!-- ============ 请求流水 ============ -->
+  <section class="flow-head">
+    <h2>请求流水</h2>
+    <span>按实际发起顺序自上而下排列 · 每张卡片完整对应一次 HTTP 请求</span>
+  </section>
+  <div class="flow" id="flow">
+    <div class="flow-empty" id="flowEmpty">
+      <div class="empty-icon">↧</div>
+      <p>这里还没有请求</p>
+      <p class="empty-sub">点击上方「一键运行完整流程」，或单独执行某个步骤</p>
+    </div>
+  </div>
+
+  <!-- ============ 环节对照表 ============ -->
+  <section class="panel legend">
+    <div class="panel-head"><h2>六个环节在卡片里的位置</h2></div>
+    <div class="legend-grid">
+      <div><span class="lg lg-1">1</span><b>触发操作</b><span>卡片顶部的按钮与说明</span></div>
+      <div><span class="lg lg-2">2</span><b>请求地址与方法</b><span>GET / POST 徽标 + 完整 URL</span></div>
+      <div><span class="lg lg-3">3</span><b>请求参数</b><span>实际发送的 JSON / Query</span></div>
+      <div><span class="lg lg-4">4</span><b>加载状态</b><span>蓝色进度条 + 请求中提示</span></div>
+      <div><span class="lg lg-5">5</span><b>响应结果</b><span>HTTP 状态码 + 格式化 JSON</span></div>
+      <div><span class="lg lg-6">6</span><b>错误信息</b><span>仅失败时出现，红色高亮</span></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    flowable-demo · 静态页面由 Spring Boot 直接托管（src/main/resources/static/），同源调用 /api，无需跨域配置
+  </footer>
+</main>
+
+</body>
+</html>

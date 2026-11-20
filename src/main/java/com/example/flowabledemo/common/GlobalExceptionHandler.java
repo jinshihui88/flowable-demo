@@ -12,6 +12,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -60,6 +61,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(FlowableObjectNotFoundException.class)
     public ResponseEntity<ApiResult<Void>> handleNotFound(FlowableObjectNotFoundException ex) {
         return build(HttpStatus.NOT_FOUND, "流程对象不存在：" + ex.getMessage());
+    }
+
+    /**
+     * 静态资源缺失（如浏览器自动请求的 /favicon.ico）属于 404，不是服务端故障。
+     * 若交给兜底的 Exception 处理器，会打出整段 ERROR 堆栈，污染日志。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResult<Void>> handleNoResource(NoResourceFoundException ex) {
+        return build(HttpStatus.NOT_FOUND, "资源不存在：" + ex.getResourcePath());
     }
 
     @ExceptionHandler(FlowableException.class)
